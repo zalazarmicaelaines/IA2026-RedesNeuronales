@@ -228,4 +228,4 @@ plotly
 
 ## 👥 Equipo
 
-TP5 — Inteligencia Artificial 2026
+Cardozo Lourdes, Dahlquist Analuz, Martinez Sofia, Zalazar Micaela
