@@ -56,15 +56,45 @@ st.markdown("""
 @st.cache_data
 def cargar_y_procesar():
     """Carga el dataset y aplica todo el preprocesamiento."""
-    url      = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
-    df       = pd.read_csv(url)
-    df_model = df[["Pclass", "Sex", "Age", "SibSp", "Parch", "Survived"]].copy()
+    url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
+    df  = pd.read_csv(url)
 
-    # FamilySize = SibSp + Parch combinados en una sola variable
+    # Incluimos Name temporalmente para extraer el título
+    df_model = df[["Pclass", "Sex", "Age", "SibSp", "Parch", "Name", "Survived"]].copy()
+
+    # ── Feature engineering: Title extraído del nombre ───────────────────────
+    # Formato del nombre: "Apellido, Titulo. Nombre"
+    # Extraemos el título (palabra entre coma y punto)
+    df_model["Title"] = df_model["Name"].str.extract(r' ([A-Za-z]+)\.', expand=False)
+
+    # Unificamos títulos equivalentes
+    df_model["Title"] = df_model["Title"].replace({"Mlle": "Miss", "Ms": "Miss", "Mme": "Mrs"})
+
+    # Títulos poco frecuentes → agrupados en "Rare"
+    titulos_rare = ["Lady","Countess","Capt","Col","Don","Dr",
+                    "Major","Rev","Sir","Jonkheer","Dona"]
+    df_model["Title"] = df_model["Title"].replace(titulos_rare, "Rare")
+
+    # Encoding numérico:
+    # Mr=0 (hombres adultos, baja supervivencia)
+    # Miss=1 (mujeres solteras/jóvenes, alta supervivencia)
+    # Mrs=2 (mujeres casadas, alta supervivencia)
+    # Master=3 (niños varones <13 años, alta supervivencia)
+    # Rare=4 (títulos especiales, comportamiento mixto)
+    df_model["Title"] = df_model["Title"].map(
+        {"Mr": 0, "Miss": 1, "Mrs": 2, "Master": 3, "Rare": 4}
+    )
+    df_model["Title"] = df_model["Title"].fillna(0)
+
+    # Eliminamos Name — ya extrajimos lo que necesitábamos
+    df_model.drop(columns=["Name"], inplace=True)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # FamilySize = SibSp + Parch combinados
     df_model["FamilySize"] = df_model["SibSp"] + df_model["Parch"]
     df_model.drop(columns=["SibSp", "Parch"], inplace=True)
 
-    # Imputación con asignación directa (compatible con pandas moderno / Copy-on-Write)
+    # Imputación de Age con mediana (asignación directa — compatible con pandas moderno)
     df_model["Age"] = df_model["Age"].fillna(df_model["Age"].median())
 
     # Encoding: male→0, female→1
@@ -78,7 +108,7 @@ def cargar_y_procesar():
 @st.cache_data
 def preparar_datos(_X, _y):
     """
-    Divide en 60% train / 20% validación / 20% test,
+    Divide en 70% train / 15% validación / 15% test,
     aplica SMOTE solo sobre train y escala los datos.
     """
     # Garantizamos que no haya NaN antes de SMOTE
@@ -87,17 +117,16 @@ def preparar_datos(_X, _y):
         if _X[col].isnull().any():
             _X[col] = _X[col].fillna(_X[col].median())
 
-    # Split 60 / 20 / 20  — stratify mantiene proporción de clases en cada partición
+    # Split 70% / 15% / 15%  — stratify mantiene proporción de clases en cada partición
     X_temp, X_test, y_temp, y_test = train_test_split(
-        _X, _y, test_size=0.20, random_state=42, stratify=_y
+        _X, _y, test_size=0.15, random_state=42, stratify=_y
     )
     X_train, X_val, y_train, y_val = train_test_split(
-        X_temp, y_temp, test_size=0.25, random_state=42, stratify=y_temp
-        # 0.25 del 80% restante = 20% del total
+        X_temp, y_temp, test_size=0.176, random_state=42, stratify=y_temp
     )
 
     # SMOTE solo sobre train — nunca sobre val ni test
-    smote              = SMOTE(random_state=42)
+    smote = SMOTE(random_state=42)
     X_train_bal, y_train_bal = smote.fit_resample(X_train, y_train)
 
     # StandardScaler — fit solo sobre train, transform en val y test
@@ -208,8 +237,9 @@ with st.sidebar:
     st.markdown("### 📂 Dataset")
     st.markdown(f"""
     - **Total de registros:** {sizes['total']}
-    - **Variables usadas:** Pclass, Sex, Age, FamilySize
+    - **Variables usadas:** Pclass, Sex, Age, Title, FamilySize
     - **Descartadas:** Fare *(redundante con Pclass)*, Embarked *(correlación espuria)*
+    - **Creadas:** Title *(extraído del nombre)*, FamilySize *(SibSp + Parch)*
     """)
 
     st.markdown("---")
@@ -217,9 +247,9 @@ with st.sidebar:
     st.markdown(f"""
     | Partición | % | Registros |
     |---|---|---|
-    | Train | 60% | {sizes['train']} |
-    | Validación | 20% | {sizes['val']} |
-    | Test | 20% | {sizes['test']} |
+    | Train | 70% | {sizes['train']} |
+    | Validación | 15% | {sizes['val']} |
+    | Test | 15% | {sizes['test']} |
 
     *Tras aplicar SMOTE el train pasa a {sizes['train_smote']} registros (balanceado 50/50)*
     """)
@@ -231,8 +261,6 @@ with st.sidebar:
 
     Genera instancias sintéticas de la clase minoritaria
     *(Survived=1)* interpolando entre ejemplos reales vecinos.
-
-    Se aplica **solo sobre train** — nunca sobre validación ni test.
     """)
 
     st.markdown("---")
@@ -267,17 +295,8 @@ with st.sidebar:
             - Épocas máx: **150**
             - Regularización L2: **alpha=0.005**
             """)
-
-        epocas_reales = resultados[nombre]["epocas"]
-        st.caption(f"Épocas reales (early stopping): {epocas_reales}")
         st.markdown("---")
 
-    st.markdown("### 📐 Escalado")
-    st.markdown("""
-    **StandardScaler** — transforma cada feature a media=0, desvío=1.
-
-    Se entrena solo con los datos de train y luego se aplica igual a validación y test.
-    """)
 
 
 # =============================================================================
@@ -316,6 +335,19 @@ with col_form:
         help="Variable de mayor impacto en la supervivencia"
     )
 
+    title = st.selectbox(
+        "Título",
+        options=[0, 1, 2, 3, 4],
+        format_func=lambda x: {
+            0: "Mr — Hombre adulto",
+            1: "Miss — Mujer soltera / joven",
+            2: "Mrs — Mujer casada",
+            3: "Master — Niño varón (< 13 años)",
+            4: "Rare — Título especial (Dr, Rev, etc.)"
+        }[x],
+        help="Extraído del nombre. Codifica edad, estado civil y clase social"
+    )
+
     age = st.slider(
         "Edad", min_value=0, max_value=80, value=28,
         help="Los niños tenían prioridad en la evacuación"
@@ -330,8 +362,10 @@ with col_form:
 with col_resultado:
     st.markdown("##### Resultado por modelo")
 
+    # Vector de features — mismo orden que el entrenamiento:
+    # [Pclass, Sex, Age, Title, FamilySize]
     sex_num  = 1 if sex == "female" else 0
-    datos_sc = scaler.transform(np.array([[pclass, sex_num, age, family_size]]))
+    datos_sc = scaler.transform(np.array([[pclass, sex_num, age, title, family_size]]))
 
     # Los 3 modelos se presentan de forma equitativa — sin indicar cuál es mejor
     for nombre, vals in resultados.items():
@@ -365,12 +399,13 @@ with col_resultado:
         </div>
         """, unsafe_allow_html=True)
 
+    titulo_label = {0:"Mr", 1:"Miss", 2:"Mrs", 3:"Master", 4:"Rare"}[title]
     st.markdown(f"""
     <div style='background:#0b1520; border:1px solid #1e3050; border-radius:8px;
                 padding:8px 14px; margin-top:4px; font-size:12px; color:#8a9bb0'>
         Pasajero evaluado: <strong style='color:#cdd8e3'>
         {'Femenino' if sex == 'female' else 'Masculino'} ·
-        Clase {pclass} · {age} años · Familia: {family_size}
+        {titulo_label} · Clase {pclass} · {age} años · Familia: {family_size}
         </strong>
     </div>
     """, unsafe_allow_html=True)
@@ -383,7 +418,7 @@ st.markdown("---")
 with st.expander("📊  Ver métricas comparativas de los 3 modelos", expanded=False):
 
     st.markdown(
-        "Resultados reales del entrenamiento evaluados sobre el **set de test** (20% del dataset)."
+        "Resultados reales del entrenamiento evaluados sobre el **set de test** (15% del dataset)."
     )
 
     tabla = pd.DataFrame({
@@ -403,19 +438,6 @@ with st.expander("📊  Ver métricas comparativas de los 3 modelos", expanded=F
 
     csv = tabla.to_csv().encode("utf-8")
     st.download_button("⬇️ Descargar CSV", csv, "resultados_modelos.csv", "text/csv")
-
-    st.markdown("---")
-    cols = st.columns(3)
-    for i, (nombre, vals) in enumerate(resultados.items()):
-        color = COLORES[nombre]
-        with cols[i]:
-            st.markdown(f"<span style='color:{color}; font-weight:700'>{nombre}</span>",
-                        unsafe_allow_html=True)
-            st.metric("Accuracy",  f"{vals['accuracy']}%")
-            st.metric("Precision", f"{vals['precision']}%")
-            st.metric("Recall",    f"{vals['recall']}%")
-            st.metric("F1-Score",  f"{vals['f1']}%")
-            st.metric("AUC-ROC",   f"{vals['auc']}")
 
 
 # =============================================================================
