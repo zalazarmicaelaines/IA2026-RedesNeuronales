@@ -1,12 +1,3 @@
-# =============================================================================
-# TP5 - RNA NO SIMBÓLICA - MULTILAYER PERCEPTRON
-# Dataset: Titanic | Interfaz: Streamlit
-#
-# Para ejecutar:
-#   pip install streamlit pandas numpy scikit-learn imbalanced-learn plotly seaborn matplotlib
-#   streamlit run titanic_streamlit_v2.py
-# =============================================================================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -59,11 +50,9 @@ def cargar_y_procesar():
     url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
     df  = pd.read_csv(url)
 
-    # Incluimos Name temporalmente para extraer el título
     df_model = df[["Pclass", "Sex", "Age", "SibSp", "Parch", "Name", "Survived"]].copy()
 
     # ── Feature engineering: Title extraído del nombre ───────────────────────
-    # Formato del nombre: "Apellido, Titulo. Nombre"
     # Extraemos el título (palabra entre coma y punto)
     df_model["Title"] = df_model["Name"].str.extract(r' ([A-Za-z]+)\.', expand=False)
 
@@ -71,16 +60,10 @@ def cargar_y_procesar():
     df_model["Title"] = df_model["Title"].replace({"Mlle": "Miss", "Ms": "Miss", "Mme": "Mrs"})
 
     # Títulos poco frecuentes → agrupados en "Rare"
-    titulos_rare = ["Lady","Countess","Capt","Col","Don","Dr",
-                    "Major","Rev","Sir","Jonkheer","Dona"]
+    titulos_rare = ["Lady","Countess","Capt","Col","Don","Dr","Major","Rev","Sir","Jonkheer","Dona"]
     df_model["Title"] = df_model["Title"].replace(titulos_rare, "Rare")
 
     # Encoding numérico:
-    # Mr=0 (hombres adultos, baja supervivencia)
-    # Miss=1 (mujeres solteras/jóvenes, alta supervivencia)
-    # Mrs=2 (mujeres casadas, alta supervivencia)
-    # Master=3 (niños varones <13 años, alta supervivencia)
-    # Rare=4 (títulos especiales, comportamiento mixto)
     df_model["Title"] = df_model["Title"].map(
         {"Mr": 0, "Miss": 1, "Mrs": 2, "Master": 3, "Rare": 4}
     )
@@ -238,7 +221,6 @@ with st.sidebar:
     st.markdown(f"""
     - **Total de registros:** {sizes['total']}
     - **Variables usadas:** Pclass, Sex, Age, Title, FamilySize
-    - **Descartadas:** Fare *(redundante con Pclass)*, Embarked *(correlación espuria)*
     - **Creadas:** Title *(extraído del nombre)*, FamilySize *(SibSp + Parch)*
     """)
 
@@ -335,19 +317,6 @@ with col_form:
         help="Variable de mayor impacto en la supervivencia"
     )
 
-    title = st.selectbox(
-        "Título",
-        options=[0, 1, 2, 3, 4],
-        format_func=lambda x: {
-            0: "Mr — Hombre adulto",
-            1: "Miss — Mujer soltera / joven",
-            2: "Mrs — Mujer casada",
-            3: "Master — Niño varón (< 13 años)",
-            4: "Rare — Título especial (Dr, Rev, etc.)"
-        }[x],
-        help="Extraído del nombre. Codifica edad, estado civil y clase social"
-    )
-
     age = st.slider(
         "Edad", min_value=0, max_value=80, value=28,
         help="Los niños tenían prioridad en la evacuación"
@@ -358,6 +327,29 @@ with col_form:
         min_value=0, max_value=10, value=0,
         help="Total de familiares a bordo (SibSp + Parch)"
     )
+
+    # Título inferido automáticamente según sexo y edad
+    # (no se muestra como campo en el formulario)
+    if sex == "male":
+        title = 3 if age < 13 else 0   # Master si es niño, Mr si es adulto
+    else:
+        # Femenino: Mrs si tiene familia, Miss si está sola
+        title = 2 if family_size > 0 else 1
+
+    # Mostrar el título inferido como campo informativo (solo lectura)
+    TITULO_LABELS = {0: "Mr", 1: "Miss", 2: "Mrs", 3: "Master", 4: "Rare"}
+    titulo_label  = TITULO_LABELS[title]
+
+    st.markdown("**Título inferido**")
+    st.markdown(f"""
+    <div style='background:#0b1520; border:1px solid #1e3050; border-radius:8px;
+                padding:9px 12px; font-size:14px; color:#e8edf4; margin-bottom:16px'>
+        🏷️ <strong style='color:#4F8EF7'>{titulo_label}</strong>
+        <span style='color:#5a6a80; font-size:12px; margin-left:8px'>
+        — inferido a partir de sexo y edad
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
 
 with col_resultado:
     st.markdown("##### Resultado por modelo")
@@ -399,7 +391,7 @@ with col_resultado:
         </div>
         """, unsafe_allow_html=True)
 
-    titulo_label = {0:"Mr", 1:"Miss", 2:"Mrs", 3:"Master", 4:"Rare"}[title]
+    titulo_label = {0: "Mr", 1: "Miss", 2: "Mrs", 3: "Master", 4: "Rare"}[title]
     st.markdown(f"""
     <div style='background:#0b1520; border:1px solid #1e3050; border-radius:8px;
                 padding:8px 14px; margin-top:4px; font-size:12px; color:#8a9bb0'>
@@ -539,15 +531,21 @@ with st.expander("📈  Ver gráficos comparativos", expanded=False):
                 )
                 cm     = vals["cm"]
                 fig_cm, ax = plt.subplots(figsize=(4, 3))
-                fig_cm.patch.set_facecolor("#0f1923")
-                ax.set_facecolor("#0f1923")
+
+                # Fondo blanco para que el colormap tenga buen contraste
+                fig_cm.patch.set_facecolor("white")
+                ax.set_facecolor("white")
+
                 sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Blues", cbar=False,
                             xticklabels=["Pred. No", "Pred. Sí"],
                             yticklabels=["Real No",  "Real Sí"],
-                            annot_kws={"size": 13, "color": "white"})
-                ax.tick_params(colors="#8a9bb0")
-                ax.set_xlabel("Predicho", color="#8a9bb0")
-                ax.set_ylabel("Real",     color="#8a9bb0")
+                            annot_kws={"size": 14, "color": "black", "weight": "bold"},
+                            linewidths=1, linecolor="#cccccc")
+
+                ax.tick_params(colors="black")
+                ax.set_xlabel("Predicho", color="black", fontsize=11)
+                ax.set_ylabel("Real",     color="black", fontsize=11)
+                ax.set_title(NOMBRES_CORTOS[nombre], color="black", fontsize=11, pad=8)
                 plt.tight_layout()
                 st.pyplot(fig_cm)
                 plt.close()
